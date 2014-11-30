@@ -20,6 +20,13 @@
 using namespace std;
 #pragma comment(lib,"wsock32.lib")
 
+bool renameFile(char *old, char* newName){
+	int result;
+	result = rename(old, newName);
+	if (result == 0){ cout << "\nFile renamed successfully.\n"; }
+	return (result == 0);
+}
+
 bool deleteFile(char *s)
 {
 	char  filename[150] = { "\0" };
@@ -289,9 +296,10 @@ bool UdpServer::ReceiveFile(int sock, char * filename, char * receiving_hostname
 		while (1)
 		{
 			/* Block until a packet comes in */
+			
 			while (ReceivePacket(sock, &recv_packet) == TIMEOUT) { ; }
 			packets_received++;
-
+			
 			if (recv_packet.type == HANDSHAKE) // Send last handshake again, server didnt receive properly
 			{
 				/* Copy the recv_packet's buffer to the handshake */
@@ -442,7 +450,7 @@ PacketType UdpServer::ReceivePacket(int sock, Packet * ptr_packet)
 //********************************************run() ****************************************************************
 void UdpServer::run()
 {
-	bool bContinue;
+	bool bContinue= false; bool bRename =false; bool result=false;
 	char path[100] = "C:\\Users\\Ankurp\\Documents\\Visual Studio 2013\\Projects\\SlidingWindowServer\\";
 	/* Initialize winsocket */
 	if (WSAStartup(0x0202, &wsadata) != 0)
@@ -516,7 +524,17 @@ void UdpServer::run()
 		}
 	}//end of get
 	else if (handshake.operation == PUT)
-	{
+	{ 
+		//check if the file exists
+		if (FileExists(handshake.filename))
+		{
+			handshake.filePresentAtserver = true;
+		}
+		else 
+		{ 	
+			handshake.filePresentAtserver = false;
+		}
+		
 		bContinue = true;
 		handshake.handshake_state = SERVER_ACKS; // server ACKs client's request
 		if (RECORD) fout << "Server: user \"" << handshake.username << "\" on host \"" << handshake.hostname << "\" requests PUT file: \"" << handshake.filename << "\"" << endl;
@@ -528,6 +546,33 @@ void UdpServer::run()
 		if (RECORD) { fout << "Server: user \"" << handshake.username << "\" on host \"" << handshake.hostname << "\" requests list Of files in server directory." << endl; }
 		bContinue = true;						 // sent boolean continue to be true
 		handshake.handshake_state = SERVER_ACKS; // server ACKs client's request, to be sent to client	
+	}
+	else if (handshake.operation == REN){
+		cout << "Server: user \"" << handshake.username << "\" on host \"" << handshake.hostname << "\" requests RENAME operation on File: \"" << handshake.filename << "\"" << endl;
+		if (RECORD) { fout << "Server: user \"" << handshake.username << "\" on host \"" << handshake.hostname << "\" RENAME operation on File: \"" << handshake.filename << "\"" << endl; }
+		
+		if (FileExists(handshake.filename))		 //check if the file exists
+		{
+			cout << "\nFile exist at server\n";
+			bContinue = false;						 // sent boolean continue to be true
+			result = renameFile(handshake.filename, handshake.newfileName);
+			if (result){
+				handshake.handshake_state = FILE_RENAMED; // server ACKs client's request, to be sent to client
+			}
+			else if (!result)
+			{
+				handshake.handshake_state = HANDSHAKE_ERROR;
+				cout << "Server: Unexpected problem in file rename." << endl;
+				if (RECORD) { fout << "Server: Unexpected problem in file rename." << endl; }
+			}
+		}
+		else
+		{
+			bContinue = false;						 // set the bool continue to be false:
+			handshake.handshake_state = FILE_NOT_EXIST;
+			if (RECORD) fout << "Server: requested file does not exist." << endl;
+			cout << "Server: requested file does not exist." << endl;
+		}
 	}
 	else if (handshake.operation == DEL)
 	{
@@ -559,6 +604,7 @@ void UdpServer::run()
 		cout << "Server: invalid request." << endl;
 	}
 
+
 	if (!bContinue) // just send, don't expect a reply.
 	{
 		/* Place handshake in send_packet's buffer */
@@ -568,6 +614,13 @@ void UdpServer::run()
 
 		/* Send MAX_RETRIES times */
 		if (handshake.handshake_state == FILE_DELETED){
+			for (int l = 0; l < MAX_RETRIES; l++){
+				if (SendPacket(sock, &send_packet, &sa_in) != sizeof(send_packet)) { printError("Error in sending packet."); }
+			}
+		}
+		else if (handshake.handshake_state == FILE_RENAMED){
+			
+			if (RECORD) { fout << "Server: requested file Renamed successfully." << endl; }
 			for (int l = 0; l < MAX_RETRIES; l++){
 				if (SendPacket(sock, &send_packet, &sa_in) != sizeof(send_packet)) { printError("Error in sending packet."); }
 			}
@@ -613,6 +666,36 @@ void UdpServer::run()
 			}
 		} while (1);
 
+		if (handshake.filePresentAtserver){
+			while (1){
+				
+				while (ReceivePacket(sock, &recv_packet) == TIMEOUT) { ; }
+
+				if (ReceivePacket(sock, &recv_packet) == HANDSHAKE){
+					/* Copy the received packet's buffer back in handshake */
+					memcpy(&handshake, recv_packet.buffer, sizeof(handshake));
+					if (handshake.bRename){
+						cout << "\nRenaming the file at destination!!\n";
+						strcpy(handshake.filename, handshake.newfileName);
+						handshake.bRename = false;
+						break;
+					}
+					else if(handshake.bReplace){
+						cout << "\nReplacing the file at destination!!\n";
+						handshake.bReplace = false;
+						break;
+					}
+					else if (handshake.bCancel){
+						cout << "\nOperation cancelled by user!!.\n";
+						handshake.operation = CANCEL;
+						handshake.bCancel = false;
+						break;
+					}
+				}
+			}
+			
+		}
+
 		/* We know for sure that the right handshake has been received */
 		switch (handshake.operation)
 		{
@@ -625,7 +708,9 @@ void UdpServer::run()
 			if (!ReceiveFile(sock, handshake.filename, server_name, server_number))//goes to the receivefile
 				printError("An error occurred while receiving the file.");
 			break;
-
+		case CANCEL:// Operation cancelled by user.
+			
+			break;
 		case LIST:
 			strcat(path, "list.txt");
 			if (!SendFile(sock, path, server_name, handshake.client_number))
@@ -638,8 +723,8 @@ void UdpServer::run()
 
 	}
 
-	if (RECORD) fout << "Closing server socket." << endl;
-	cout << "Closing server socket." << endl;
+	if (RECORD) fout << "\nClosing server socket." << endl;
+	cout << "\nClosing server socket." << endl;
 
 	closesocket(sock);
 	cout << "Press Enter to exit..." << endl; getchar();
