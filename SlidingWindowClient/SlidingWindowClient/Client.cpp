@@ -19,6 +19,14 @@
 using namespace std;
 #pragma comment(lib,"wsock32.lib")
 
+bool renameFile(char *old, char* newName){
+	int result;
+	result = rename(old, newName);
+	if (result == 0){ cout << "File renamed successfully."; }
+	return (result == 0);
+}
+
+
 bool deleteFile(char *s)
 {
 	char  filename[150] = { "\0" };
@@ -466,13 +474,14 @@ void UdpClient::run()
 {
 	char server[INPUT_LENGTH];
 	char filename[INPUT_LENGTH];
+	char newfileName[INPUT_LENGTH];
 	char direction[INPUT_LENGTH];
 	char hostname[HOSTNAME_LENGTH];
 	TCHAR username[USERNAME_LENGTH];
 	DWORD susername = sizeof(username);
 	char remotehost[HOSTNAME_LENGTH];
 	unsigned long filename_length = (unsigned long)FILENAME_LENGTH;
-	bool InputDetailsValid; bool bContinue;
+	bool InputDetailsValid; bool bContinue,status =false,bRename =false;
 	char path[100] = "C:\\Users\\Ankurp\\Documents\\Visual Studio 2013\\Projects\\SlidingWindowClient\\";
 	/* Initialize winsocket */
 	if (WSAStartup(0x0202, &wsadata) != 0)
@@ -530,6 +539,7 @@ void UdpClient::run()
 		cout << "\n'Put' to put a file on Server." << flush;
 		cout << "\n'List' to request a list of files ." << flush;
 		cout << "\n'Delete' to delete file ." << flush;
+		cout << "\n'Ren' to Rename file ." << flush;
 		cout << "\nEnter your choice : " << flush;
 		cin >> direction; cout << endl;
 
@@ -595,8 +605,34 @@ void UdpClient::run()
 			printlist();
 			cout << "\nEnter file name   : " << flush; cin >> filename;
 
-			InputDetailsValid = true;
-			handshake.direction = GET;
+			while (FileExists(filename)){
+				cout << "\nA file with same name of requested file already exist at client Local Directory.";
+				cout << "\nEnter 'R' Rename the File in operation. " << flush
+					 << "\nEnter 'N' to Replace the destination File." << flush
+					 << "\nEnter 'C' to Cancel the File transfer." << flush
+					 << "\nConfirm before Renaming/Replace/Cancel."<<flush
+					 << "\nEnter your choice : " << flush;
+				cin >> choice; cout << endl;
+
+				if (choice[0] == 'Y'){
+					cout << "\n Client Requested to Rename the file at its destination. ";
+					cout << "\nEnter new file name   : " << flush; cin >> filename;
+					strcpy(handshake.filename, filename);
+					handshake.direction = GET;
+					InputDetailsValid = true;
+				}
+				if (choice[0] == 'N'){
+					cout << "\n Client Requested to Replace the local file. ";
+					handshake.direction = GET;
+					InputDetailsValid = true;
+					break;
+				}
+				if (choice[0] == 'C'){
+					cout << "\n Client Requested to Cancel the operation. ";
+					InputDetailsValid = false; bContinue = false;
+					break;
+				}
+			}
 		}
 		else if (strcmp(direction, "Put") == 0)
 		{
@@ -604,12 +640,67 @@ void UdpClient::run()
 			cout << "\nEnter file name   : " << flush; cin >> filename;
 			if (!FileExists(filename)){
 				printError("File does not exist on client side.");
-				system("PAUSE");
-				break;
 			}
 			else{
 				handshake.direction = PUT;
 				InputDetailsValid = true;
+			}
+		}
+		else if (strcmp(direction, "Ren") == 0)
+		{
+			cout << "\nEnter C for client directory" << flush
+				 << "\nEnter S for server directory" << flush
+				 << "\nEnter your choice : " << flush;
+			cin >> choice; cout << endl;
+
+			if (choice[0] == 'C')
+			{
+				list(CLIENT_DIR_PATH);
+				cout << "\nEnter file name   : " << flush; cin >> filename;
+
+				/*Check if file exist or not.*/
+				if (FileExists(filename))
+				{
+					cout << "\nFile  exist on client side. \n Confirm before Renaming.";
+					cout << "\nEnter 'R' to Rename the File . " << flush
+						 << "\nEnter 'C' to Cancel the operation." << flush
+						 << "\nEnter your choice : " << flush;
+					cin >> choice; cout << endl;
+
+					if (choice[0] == 'R'){
+						char * oldName, *newName;
+						oldName = filename;
+						cout << "\nEnter file name   : " << flush; cin >> filename;
+						newName = filename;
+						status = renameFile(oldName, newName);
+						if (!status){ printError("\n Problem in renaming the file."); }
+					}
+					else if (choice[0] == 'C'){ cout << "Operation Cancelled by user!!"; }
+				}
+				else { printError("File does not exist on client side."); }
+			}
+			else if (choice[0] == 'S')
+			{
+				printlist();
+				cout << "\nEnter file name   : " << flush; cin >> filename;
+				cout << "\nConfirm before Renaming.";
+				cout << "\nEnter 'R' to Rename the File at Server. " << flush
+					 << "\nEnter 'C' to Cancel the operation." << flush
+					 << "\nEnter your choice : " << flush;
+				cin >> choice; cout << endl;
+
+				if (choice[0] == 'R'){
+					cout << "\nEnter new file name   : " << flush; cin >> newfileName;
+					strcpy(handshake.newfilename, newfileName);
+					handshake.direction = REN;
+					InputDetailsValid = true;
+					bContinue = false;
+				}
+				else if (choice[0] == 'C')
+				{ 
+					cout << "Operation Cancelled by user!!"; 
+					InputDetailsValid = false; bContinue = false;
+				}
 			}
 		}
 		else
@@ -682,6 +773,13 @@ void UdpClient::run()
 						cout << "Client: Need to Refresh the List of Server directory files /folders!" << endl;
 						bContinue = false; break;
 					}
+					else if (handshake.handshake_type == FILE_RENAMED)
+					{
+						cout << "Client: Server Responds Renamed!" << endl;
+						if (RECORD) { fout << "Client: Server Responds file Renamed!" << endl; }
+						bContinue =false; break;
+						
+					}
 					else if (handshake.handshake_type == HANDSHAKE_ERROR)
 					{
 						cout << "Client: Server Responds Handshake ERROR!" << endl;
@@ -691,6 +789,8 @@ void UdpClient::run()
 
 				}
 			} while (1);
+
+			
 
 			if (bContinue)
 			{
@@ -710,6 +810,38 @@ void UdpClient::run()
 
 				if (RECORD) fout << "Client: sent handshake 3 (C" << client_number << " S" << server_number << ")" << endl;
 				cout << "Client: sent handshake 3 (C" << client_number << " S" << server_number << ")" << endl;
+				
+				if (handshake.filePresentAtServer){					
+						cout << "\nA Remote file with name similar to the file in opeartion already present at server.";
+						cout << "\nEnter 'R' Rename the File in operation. " << flush
+							<< "\nEnter 'N' to Replace the destination File." << flush
+							<< "\nEnter 'C' to Cancel the File transfer." << flush
+							<< "\nConfirm before Renaming/Replace/Cancel." << flush
+							<< "\nEnter your choice : " << flush;
+						cin >> choice; cout << endl;
+
+						if (choice[0] == 'R'){
+							cout << "\nClient Requested to Rename the file at its destination. ";
+							cout << "\nEnter new file name   : " << flush; cin >> newfileName;
+							strcpy(handshake.newfilename, newfileName);
+							handshake.bRename = true;
+						}
+						if (choice[0] == 'N'){
+							cout << "\nClient Requested to Replace the local file. ";
+							handshake.bReplace = true;
+						}
+						if (choice[0] == 'C'){
+							cout << "\nClient Requested to Cancel the operation. ";
+							handshake.direction = CANCEL;
+							handshake.bCancel = true;
+						}
+					
+					/* Copy the received packet's buffer back in handshake */
+					memcpy(send_packet.buffer, &handshake, sizeof(handshake));
+
+					for (int k = 0; k < MAX_RETRIES; k++)
+					if (SendPacket(sock, &send_packet, &sa_in) != sizeof(send_packet)) { printError("Error in sending packet."); }
+				}
 
 				switch (handshake.direction)
 				{
@@ -717,17 +849,23 @@ void UdpClient::run()
 					if (!ReceiveFile(sock, handshake.filename, hostname, client_number))
 						printError("An error occurred while receiving the file.");
 					break;
+				
 				case PUT: // Client is sending host, server expects seq
 					if (!SendFile(sock, handshake.filename, hostname, server_number))
 						printError("An error occurred while sending the file.");
 					break;
-				case LIST:
+				
+				case LIST:// Client requested List of files in server directory.
 					strcat(path, "list.txt");
 					if (!ReceiveFile(sock, path, hostname, handshake.client_number))
 						printError("An error occurred while receiving the file.");
 					SetFileAttributes(handshake.filename, FILE_ATTRIBUTE_HIDDEN);
 					printlist();
 					break;
+										
+				case CANCEL:// Operation cancelled by user.
+					break;
+
 				default:
 					break;
 				}
