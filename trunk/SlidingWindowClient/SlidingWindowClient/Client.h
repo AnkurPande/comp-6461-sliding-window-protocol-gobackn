@@ -20,15 +20,15 @@ using namespace std;
 #define USERNAME_LENGTH 20
 #define FILENAME_LENGTH 20
 #define FRAME_BUFFER_SIZE 60
-#define PACKET_BUFFER_SIZE 80
+#define PACKET_BUFFER_SIZE 100
 #define MAX_RANDOM 256;
 #define SEQUENCE_WIDTH 3
 #define CLIENT_DIR_PATH "C:\\Users\\Ankurp\\Documents\\Visual Studio 2013\\Projects\\SlidingWindowClient\\SlidingWindowClient" //Path of Client directory
 
 
 typedef enum { HANDSHAKE = 1, FRAME, FRAME_RESPONSE, TIMEOUT, PACKET_RECV_ERROR } PacketType;
-typedef enum { CLIENT_REQ = 1, SERVER_ACKS, CLIENT_ACKS, FILE_NOT_EXIST, INVALID ,FILE_DELETED, RENAME,HANDSHAKE_ERROR} HandshakeType;
-typedef enum { GET = 1, PUT,LIST,DEL,REN } Operation;
+typedef enum { CLIENT_REQ = 1, SERVER_ACKS, CLIENT_ACKS, FILE_NOT_EXIST, INVALID,FILE_DELETED, HANDSHAKE_ERROR,FILE_RENAMED} HandshakeType;
+typedef enum { GET = 1, PUT, LIST, DEL, REN,CANCEL } Operation;
 typedef enum { ACK = 1, NAK } FrameResponseType;
 
 typedef struct {
@@ -42,9 +42,14 @@ typedef struct {
 	Operation direction;
 	int client_number;
 	int server_number;
+	bool filePresentAtServer;
+	bool bRename;
+	bool bReplace;
+	bool bCancel;
 	char hostname[HOSTNAME_LENGTH];
 	char username[USERNAME_LENGTH];
 	char filename[FILENAME_LENGTH];
+	char newfilename[FILENAME_LENGTH];
 } Handshake;
 
 typedef struct {
